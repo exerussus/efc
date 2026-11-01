@@ -1,0 +1,74 @@
+{
+  "protocol": "efc/1",
+  "instance": "build-server@host-01:/srv/app",
+  "server": "build-server",
+  "version": "1.4.0",
+  "pid": 4120,
+  "started": "2026-01-15T09:00:00Z",
+  "title": "Сборка приложения",
+  "howToStart": "Запустите сервер сборки: build-server --channel /srv/app/.efc",
+  "roots": {
+    "channel": ".",
+    "project": ".."
+  },
+  "beat": 2,
+  "limits": {
+    "requestBytes": 1048576,
+    "outputChars": 524288,
+    "defaultTimeout": 600,
+    "defaultKeep": 300,
+    "minKeep": 60,
+    "maxKeep": 86400,
+    "trashMaxAge": 86400,
+    "artifactKeep": 86400,
+    "queue": 100
+  },
+  "features": [
+    "cancel",
+    "batch",
+    "inbox",
+    "state",
+    "artifacts"
+  ],
+  "commands": [
+    {
+      "name": "help",
+      "summary": "Список команд",
+      "usage": "help [команда]",
+      "readOnly": true
+    },
+    {
+      "name": "build",
+      "summary": "Собрать проект",
+      "usage": "build [--release]",
+      "long": true
+    },
+    {
+      "name": "test",
+      "summary": "Запустить тесты",
+      "usage": "test [--filter <regex>]",
+      "long": true,
+      "idempotent": true
+    },
+    {
+      "name": "release",
+      "summary": "Выпустить версию (с подтверждением человека)",
+      "usage": "release <версия>",
+      "long": true
+    },
+    {
+      "name": "trash.clean",
+      "summary": "Очистить корзину канала",
+      "usage": "trash.clean [--dry]"
+    }
+  ],
+  "reasons": [
+    "build-failed",
+    "tests-failed",
+    "busy",
+    "no-approval"
+  ],
+  "state": {
+    "status": "state/status.json"
+  }
+}

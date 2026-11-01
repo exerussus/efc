@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/request.schema.json",
+  "title": "EFC: запрос (requests/<id>.json)",
+  "type": "object",
+  "required": [
+    "v",
+    "id"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{1,64}$"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "params": {
+      "type": "object"
+    },
+    "batch": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "onError": {
+      "enum": [
+        "stop",
+        "continue"
+      ]
+    },
+    "from": {
+      "type": "string"
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeout": {
+      "type": "number",
+      "minimum": 0
+    },
+    "keep": {
+      "type": "number",
+      "minimum": 0
+    },
+    "force": {
+      "type": "boolean"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "command"
+      ],
+      "not": {
+        "required": [
+          "batch"
+        ]
+      }
+    },
+    {
+      "required": [
+        "batch"
+      ],
+      "not": {
+        "required": [
+          "command"
+        ]
+      }
+    }
+  ]
+}

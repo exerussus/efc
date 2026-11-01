@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "key": "r-17",
+  "why": "задача сдана: принять или вернуть",
+  "since": "2026-01-15T08:40:00Z",
+  "suggest": [
+    {
+      "command": "record.status",
+      "params": {
+        "record": "r-17",
+        "to": "done"
+      }
+    }
+  ],
+  "ref": {
+    "root": "channel",
+    "path": "state/records/r-17.json"
+  }
+}

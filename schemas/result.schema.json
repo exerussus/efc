@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/result.schema.json",
+  "title": "EFC: итог (done/<id>.json)",
+  "type": "object",
+  "required": [
+    "v",
+    "id",
+    "state",
+    "ok",
+    "exitCode"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{1,64}$"
+    },
+    "state": {
+      "const": "done"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "exitCode": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "output": {
+      "type": "string"
+    },
+    "data": {},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "root": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "abs": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ok",
+          "exitCode"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "exitCode": {
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "data": {}
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "cancelIgnored": {
+      "type": "boolean"
+    },
+    "accepted": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "expires": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

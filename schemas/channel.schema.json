@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/channel.schema.json",
+  "title": "EFC: паспорт канала (channel.json)",
+  "type": "object",
+  "required": [
+    "protocol",
+    "instance",
+    "server",
+    "version"
+  ],
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "pattern": "^efc/[0-9]+$"
+    },
+    "instance": {
+      "type": "string",
+      "minLength": 1
+    },
+    "server": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "pid": {
+      "type": "integer"
+    },
+    "started": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "title": {
+      "type": "string"
+    },
+    "howToStart": {
+      "type": "string"
+    },
+    "roots": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "beat": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "string"
+          },
+          "long": {
+            "type": "boolean"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "readOnly": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "subchannels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "client": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

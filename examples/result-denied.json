@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "20260115-093000-500-77aa01",
+  "state": "done",
+  "ok": false,
+  "exitCode": 8,
+  "error": "Выпуск не подтверждён",
+  "reason": "no-approval",
+  "output": "",
+  "accepted": "2026-01-15T09:30:00Z",
+  "finished": "2026-01-15T09:35:00Z",
+  "seconds": 300.0,
+  "expires": "2026-01-15T09:40:00Z"
+}

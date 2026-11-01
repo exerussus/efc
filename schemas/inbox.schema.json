@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/inbox.schema.json",
+  "title": "EFC: ожидающее действие (inbox/<key>.json)",
+  "type": "object",
+  "required": [
+    "v",
+    "key",
+    "why"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "key": {
+      "type": "string"
+    },
+    "why": {
+      "type": "string"
+    },
+    "since": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "suggest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "ref": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "root": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "abs": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

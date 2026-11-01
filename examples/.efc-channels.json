@@ -1,0 +1,12 @@
+[
+  {
+    "name": "app-build",
+    "path": "build/.efc",
+    "title": "Сборка приложения"
+  },
+  {
+    "name": "tracker",
+    "path": "tracker/.efc",
+    "title": "Задачи"
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "id": "20260115-091500-004-9f0e1d",
+  "state": "done",
+  "ok": false,
+  "exitCode": 1,
+  "error": "record.status: переход review → done недоступен",
+  "reason": "bad-transition",
+  "items": [
+    {
+      "ok": true,
+      "exitCode": 0,
+      "data": {
+        "comment": "c-3"
+      }
+    },
+    {
+      "ok": false,
+      "exitCode": 1,
+      "error": "переход review → done недоступен",
+      "reason": "bad-transition"
+    }
+  ],
+  "accepted": "2026-01-15T09:15:00Z",
+  "finished": "2026-01-15T09:15:00Z",
+  "seconds": 0.03,
+  "expires": "2026-01-15T09:20:00Z"
+}

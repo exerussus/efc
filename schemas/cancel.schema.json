@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/cancel.schema.json",
+  "title": "EFC: просьба отменить (cancel/<id>.json)",
+  "type": "object",
+  "required": [
+    "v",
+    "id"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{1,64}$"
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

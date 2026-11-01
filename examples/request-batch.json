@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "id": "20260115-091500-004-9f0e1d",
+  "onError": "stop",
+  "from": "agent",
+  "created": "2026-01-15T09:15:00Z",
+  "timeout": 60,
+  "keep": 300,
+  "batch": [
+    {
+      "command": "record.comment",
+      "params": {
+        "record": "r-17",
+        "text": "Проверено"
+      }
+    },
+    {
+      "command": "record.status",
+      "params": {
+        "record": "r-17",
+        "to": "done"
+      }
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/active.schema.json",
+  "title": "EFC: принятый вызов (active/<id>.json)",
+  "type": "object",
+  "required": [
+    "v",
+    "id",
+    "state"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{1,64}$"
+    },
+    "state": {
+      "enum": [
+        "running",
+        "waiting"
+      ]
+    },
+    "command": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "progress": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "asks": {
+      "type": "object",
+      "required": [
+        "who",
+        "text"
+      ],
+      "properties": {
+        "who": {
+          "enum": [
+            "human",
+            "client"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "job": {
+      "type": "string"
+    },
+    "accepted": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

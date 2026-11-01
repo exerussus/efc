@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/alive.schema.json",
+  "title": "EFC: пульс (alive.json)",
+  "type": "object",
+  "required": [
+    "v",
+    "seq",
+    "beat",
+    "state"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "beat": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "server": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "pid": {
+      "type": "integer"
+    },
+    "state": {
+      "enum": [
+        "ready",
+        "busy",
+        "degraded",
+        "stopping"
+      ]
+    },
+    "detail": {
+      "type": "object"
+    }
+  }
+}

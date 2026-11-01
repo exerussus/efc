@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://efc.invalid/schemas/channels-index.schema.json",
+  "title": "EFC: указатель каналов (.efc-channels.json)",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "name",
+      "path"
+    ],
+    "properties": {
+      "name": {
+        "type": "string"
+      },
+      "path": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      }
+    }
+  }
+}
