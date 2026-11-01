@@ -323,9 +323,9 @@ pub fn run(channel: &Option<String>, args: &[String]) -> i32 {
             "--client" => val("--client").map(|v| clients.push(PathBuf::from(v))),
             "--name" => val("--name").map(|v| name = Some(v)),
             "--take-over" => {
-                let _: () = take_over = true;
+                take_over = true;
                 Ok(())
-            },
+            }
             "--config" => val("--config").and_then(|v| {
                 let text = std::fs::read_to_string(&v).map_err(|e| format!("--config {v}: {e}"))?;
                 let f: ServeConfigFile = serde_json::from_str(&text).map_err(|e| format!("--config {v}: {e}"))?;

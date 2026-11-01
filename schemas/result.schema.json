@@ -101,7 +101,34 @@
               "null"
             ]
           },
-          "data": {}
+          "data": {},
+          "id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "failed",
+              "skipped",
+              "cancelled"
+            ]
+          },
+          "output": {
+            "type": "string"
+          },
+          "expectFailed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "seconds": {
+            "type": "number",
+            "minimum": 0
+          }
         }
       }
     },

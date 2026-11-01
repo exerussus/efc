@@ -19,7 +19,8 @@ const USAGE: &str = "efc — файловый канал efc/1
   list                              каналы рядом (вверх от текущей папки, .efc-channels.json, EFC_PATH)
   help [команда]                    команды сервера
   call <команда> [аргументы…]       вызвать и дождаться итога (всё после имени команды — её аргументы)
-  batch <файл.json|->               пакет: {\"batch\":[{\"command\":…,\"args\":[…]}…], \"onError\":\"stop\"}
+  batch <файл.json|->               пакет: {\"batch\":[{\"id\":\"a\",\"command\":…,\"args\":[…],\"expect\":{…}}…],\"onError\":\"stop\"}
+                                    шаги: ${a.поле} из data шага a, expect, always, onError/timeout у шага
   wait <id>                         ждать итога (не дольше --max)
   result <id>                       итог, если уже есть
   cancel <id> [--reason текст]      попросить отменить
@@ -45,7 +46,8 @@ const USAGE: &str = "efc — файловый канал efc/1
   --keep <с>              сколько хранить итог, если не забран
   --max <с>               сколько ждать клиенту (по умолчанию — срок запроса)
   --no-wait               вернуть id, как только вызов принят
-  --force                 передать серверу force
+  --force                 передать серверу force (пройти чужую блокировку)
+  --lock                  блокировка на время вызова: чужие меняющие вызовы получат код 6
   --params <json>         объект params для call
   --from <имя>            подпись запроса
   --trace                 трассировка в <канал>/trace/ (то же, что EFC_TRACE=1)
@@ -67,6 +69,7 @@ struct Global {
     force: bool,
     params: Option<String>,
     from: Option<String>,
+    lock: bool,
 }
 
 fn main() -> ExitCode {
@@ -94,20 +97,24 @@ fn run(argv: Vec<String>) -> i32 {
         let r: Result<(), String> = match a.as_str() {
             "--channel" => it.next().map(|v| g.channel = Some(v)).ok_or("--channel: нужна папка или имя".into()),
             "--json" => {
-                let _: () = g.json = true;
+                g.json = true;
                 Ok(())
-            },
+            }
             "--timeout" => num(it.next(), "--timeout").map(|v| g.timeout = Some(v)),
             "--keep" => num(it.next(), "--keep").map(|v| g.keep = Some(v)),
             "--max" => num(it.next(), "--max").map(|v| g.max = Some(v)),
             "--no-wait" => {
-                let _: () = g.no_wait = true;
+                g.no_wait = true;
                 Ok(())
-            },
+            }
             "--force" => {
-                let _: () = g.force = true;
+                g.force = true;
                 Ok(())
-            },
+            }
+            "--lock" => {
+                g.lock = true;
+                Ok(())
+            }
             "--params" => it.next().map(|v| g.params = Some(v)).ok_or("--params: нужен JSON".into()),
             "--from" => it.next().map(|v| g.from = Some(v)).ok_or("--from: нужно имя".into()),
             "--trace" if rest.is_empty() || rest[0] != "call" => {
@@ -196,7 +203,7 @@ fn run(argv: Vec<String>) -> i32 {
 }
 
 fn opts(g: &Global) -> CallOpts {
-    CallOpts { timeout: g.timeout, keep: g.keep, no_wait: g.no_wait, max_wait: g.max, force: g.force }
+    CallOpts { timeout: g.timeout, keep: g.keep, no_wait: g.no_wait, max_wait: g.max, force: g.force, lock: g.lock }
 }
 
 fn with_client(g: &Global, f: impl FnOnce(&Client) -> i32) -> i32 {
@@ -262,12 +269,14 @@ fn cmd_batch(g: &Global, args: &[String]) -> i32 {
     req.timeout = g.timeout.or(req.timeout);
     req.keep = g.keep.or(req.keep);
     req.force |= g.force;
+    req.lock |= g.lock;
     with_client(g, |c| {
         if c.alive().is_none() {
             return print_waited(g, c, Waited::NoServer);
         }
         let id = match c.submit_request(req) {
             Ok(id) => id,
+            Err(e) if e.kind() == std::io::ErrorKind::Unsupported => return fail(exit::USAGE, e.to_string()),
             Err(e) => return fail(exit::FAILED, format!("не записать запрос: {e}")),
         };
         let max = g.max.or(g.timeout).unwrap_or(600.0);
@@ -356,10 +365,19 @@ fn print_outcome(g: &Global, c: &Client, w: Waited, accepted_ok: bool) -> i32 {
                 }
             }
             if let Some(items) = &d.items {
+                let mut skipped = Vec::new();
                 for (i, it) in items.iter().enumerate() {
-                    if !it.ok {
-                        eprintln!("  #{} — код {}: {}", i + 1, it.exit_code, it.error.clone().unwrap_or_default());
+                    let name = it.id.clone().unwrap_or_else(|| format!("#{}", i + 1));
+                    match it.status.as_deref() {
+                        Some("skipped") | Some("cancelled") => skipped.push(name),
+                        _ if !it.ok => {
+                            eprintln!("  ✗ {name} ({}): код {} — {}", it.command.clone().unwrap_or_default(), it.exit_code, it.error.clone().unwrap_or_default());
+                        }
+                        _ => {}
                     }
+                }
+                if !skipped.is_empty() {
+                    eprintln!("  пропущены: {}", skipped.join(", "));
                 }
             }
             if !d.ok {

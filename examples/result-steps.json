@@ -1,0 +1,61 @@
+{
+  "v": 1,
+  "id": "20260115-094000-000-5e7e95",
+  "state": "done",
+  "ok": false,
+  "exitCode": 1,
+  "error": "check (logs): проверка не прошла: data.rows = 2, ожидалось 0",
+  "reason": "expect-failed",
+  "output": "▸ build build — ok\nсобрано\n▸ run start — ok\n▸ check logs — ошибка\nNullReferenceException …\nTimeoutException …\n▸ stop stop — ok\n",
+  "items": [
+    {
+      "id": "build",
+      "command": "build",
+      "status": "ok",
+      "ok": true,
+      "exitCode": 0,
+      "output": "собрано\n",
+      "seconds": 41.2
+    },
+    {
+      "id": "run",
+      "command": "start",
+      "status": "ok",
+      "ok": true,
+      "exitCode": 0,
+      "data": {
+        "logSince": 1532
+      },
+      "seconds": 3.1
+    },
+    {
+      "id": "check",
+      "command": "logs",
+      "status": "failed",
+      "ok": false,
+      "exitCode": 1,
+      "error": "проверка не прошла: data.rows = 2, ожидалось 0",
+      "reason": "expect-failed",
+      "data": {
+        "rows": 2
+      },
+      "output": "NullReferenceException …\nTimeoutException …\n",
+      "expectFailed": [
+        "data.rows = 2, ожидалось 0"
+      ],
+      "seconds": 0.1
+    },
+    {
+      "id": "stop",
+      "command": "stop",
+      "status": "ok",
+      "ok": true,
+      "exitCode": 0,
+      "seconds": 1.4
+    }
+  ],
+  "accepted": "2026-01-15T09:40:00Z",
+  "finished": "2026-01-15T09:40:46Z",
+  "seconds": 45.9,
+  "expires": "2026-01-15T09:45:46Z"
+}

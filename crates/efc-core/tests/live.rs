@@ -441,3 +441,103 @@ fn trash_clean_passes_full_queue() {
     let d = done(c.call("trash.clean", &[], Value::Null, &CallOpts { max_wait: Some(2.0), ..opts() }));
     assert!(d.ok);
 }
+
+fn batch_req(ops: Vec<Op>) -> Request {
+    Request { batch: Some(ops), timeout: Some(30.0), keep: Some(60.0), ..Default::default() }
+}
+
+fn step(id: &str, command: &str, args: &[&str]) -> Op {
+    Op { id: Some(id.into()), command: command.into(), args: args.iter().map(|s| s.to_string()).collect(), ..Default::default() }
+}
+
+#[test]
+fn steps_substitute_args_and_params() {
+    let root = temp();
+    let _s = start(&root);
+    let c = Client::open(&root);
+    let mut b = step("b", "echo", &["${a.args.0}-${a.args.1}"]);
+    b.params = json!({ "from": "${a.args}" });
+    let id = c.submit_request(batch_req(vec![step("a", "echo", &["x", "y"]), b])).unwrap();
+    let d = done(c.wait(&id, 10.0, false, true));
+    assert!(d.ok, "{:?}", d.error);
+    let items = d.items.unwrap();
+    assert_eq!(items[1].output, "x-y\n");
+    assert_eq!(items[1].data["params"]["from"], json!(["x", "y"]));
+    assert!(d.output.contains("▸ a echo — ok") && d.output.contains("▸ b echo — ok"), "{}", d.output);
+}
+
+#[test]
+fn step_bad_reference_fails_without_running() {
+    let root = temp();
+    let _s = start(&root);
+    let c = Client::open(&root);
+    let id = c.submit_request(batch_req(vec![step("a", "echo", &["${nope.x}"])])).unwrap();
+    let d = done(c.wait(&id, 10.0, false, true));
+    assert_eq!(d.exit_code, exit::USAGE);
+    assert_eq!(d.items.unwrap()[0].reason.as_deref(), Some("bad-reference"));
+}
+
+#[test]
+fn step_timeout_and_always_after_cancel() {
+    let root = temp();
+    let _s = start(&root);
+    let c = Client::open(&root);
+    // шаг со своим пределом: sleep 30 при timeout 0.3 → 5
+    let mut slow = step("slow", "sleep", &["30"]);
+    slow.timeout = Some(0.3);
+    let id = c.submit_request(batch_req(vec![slow])).unwrap();
+    let t = Instant::now();
+    let d = done(c.wait(&id, 10.0, false, true));
+    assert_eq!(d.exit_code, exit::TIMEOUT);
+    assert_eq!(d.items.unwrap()[0].reason.as_deref(), Some("step-timeout"));
+    assert!(t.elapsed() < Duration::from_secs(3));
+
+    // отмена посреди шага: следующий обычный шаг — cancelled, шаг always — выполняется
+    let mut cleanup = step("cleanup", "sleep", &["0.2"]);
+    cleanup.always = true;
+    let id = c.submit_request(batch_req(vec![step("work", "sleep", &["30"]), step("next", "echo", &["x"]), cleanup])).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    c.cancel(&id, None).unwrap();
+    let d = done(c.wait(&id, 10.0, false, true));
+    assert_eq!(d.exit_code, exit::CANCELLED);
+    let st: Vec<String> = d.items.unwrap().iter().map(|i| i.status.clone().unwrap()).collect();
+    assert_eq!(st, vec!["failed", "cancelled", "ok"], "always-шаг выполнен после отмены, сон не прерван отменой вызова");
+}
+
+#[test]
+fn lock_blocks_changing_calls() {
+    let root = temp();
+    let _s = start(&root);
+    let c = Client::open(&root);
+    let mut req = batch_req(vec![step("hold", "sleep", &["1.5"])]);
+    req.lock = true;
+    let holder = c.submit_request(req).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let d = done(c.call("echo", &["x".into()], Value::Null, &opts()));
+    assert_eq!(d.exit_code, exit::BUSY);
+    assert_eq!(d.data["busyWith"], holder.as_str());
+    // читающие и trash.clean проходят; force — тоже
+    assert!(done(c.call("ping", &[], Value::Null, &opts())).ok);
+    assert!(done(c.call("trash.clean", &["--dry".into()], Value::Null, &opts())).ok);
+    assert!(done(c.call("echo", &["x".into()], Value::Null, &CallOpts { force: true, ..opts() })).ok);
+    assert!(done(c.wait(&holder, 10.0, false, true)).ok);
+    // блокировка снята с итогом
+    assert!(done(c.call("echo", &["x".into()], Value::Null, &opts())).ok);
+}
+
+#[test]
+fn client_refuses_steps_without_server_support() {
+    let root = temp();
+    let _s = start(&root);
+    let mut c = Client::open(&root);
+    c.channel.as_mut().unwrap().features.retain(|f| f != "steps" && f != "lock");
+    let mut e = step("a", "ping", &[]);
+    e.expect = Some(serde_json::from_value(json!({ "exit": 0 })).unwrap());
+    let err = c.submit_request(batch_req(vec![e])).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+    assert!(err.to_string().contains("steps"));
+    let mut req = batch_req(vec![Op { command: "ping".into(), ..Default::default() }]);
+    assert!(c.submit_request(req.clone()).is_ok(), "простой пакет без шагов — можно");
+    req.lock = true;
+    assert!(c.submit_request(req).unwrap_err().to_string().contains("lock"));
+}

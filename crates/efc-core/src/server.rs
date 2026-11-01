@@ -6,6 +6,7 @@
 
 use crate::fsx::{self, list_json, stem, write_json};
 use crate::model::*;
+use crate::steps::{self, StepResult};
 use crate::time;
 use crate::trace;
 use serde_json::{json, Value};
@@ -142,15 +143,20 @@ pub struct Ctx {
     cancel: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
     deadline: Instant,
+    /// Шаг `always` после остановки пакета: отмена вызова и его срок к шагу не относятся.
+    cleanup: AtomicBool,
+    /// Срок текущего шага пакета.
+    step_deadline: Mutex<Option<Instant>>,
     /// Сколько запрос пролежал в requests/ до того, как сервер его забрал, мс (по часам сервера).
     pub age_at_claim_ms: f64,
     active: Mutex<Active>,
 }
 
 impl Ctx {
-    /// Клиент попросил отменить.
+    /// Пора остановиться: клиент попросил отменить, вышел срок вызова или срок шага пакета.
     pub fn cancelled(&self) -> bool {
-        self.cancel.load(Ordering::SeqCst)
+        let step_over = self.step_deadline.lock().unwrap().map(|d| Instant::now() >= d).unwrap_or(false);
+        step_over || (!self.cleanup.load(Ordering::SeqCst) && self.cancel.load(Ordering::SeqCst))
     }
 
     /// Когда вызову пора закончиться (срок запроса). После него сервер просит отменить, а через 30 с
@@ -159,9 +165,18 @@ impl Ctx {
         self.deadline
     }
 
-    /// Сколько осталось до срока.
+    /// Сколько осталось до срока (вызова или текущего шага пакета — что раньше).
     pub fn remaining(&self) -> Duration {
-        self.deadline.saturating_duration_since(Instant::now())
+        let now = Instant::now();
+        let call = if self.cleanup.load(Ordering::SeqCst) { None } else { Some(self.deadline) };
+        let step = *self.step_deadline.lock().unwrap();
+        match (call, step) {
+            (Some(c), Some(st)) => c.min(st),
+            (Some(c), None) => c,
+            (None, Some(st)) => st,
+            (None, None) => now + CLEANUP_STEP,
+        }
+        .saturating_duration_since(now)
     }
 
     /// Итог уже записан (например, сервер закрыл вызов по сроку) — дальнейшая работа никому не нужна.
@@ -277,6 +292,11 @@ const ORPHAN_AGE: f64 = 3600.0;
 const TMP_AGE: f64 = 600.0;
 const CANCEL_ORPHAN_AGE: f64 = 60.0;
 const PARSE_GRACE: f64 = 2.0;
+/// Срок шага `always` после остановки пакета, если у шага нет своего.
+const CLEANUP_STEP: Duration = Duration::from_secs(60);
+/// Сколько вывода шага хранить в `items[].output`.
+const ITEM_OUTPUT: usize = 4000;
+
 /// Сколько ждать вызов после его срока (уже с просьбой отменить), прежде чем закрыть кодом 5.
 const OVERDUE_GRACE: Duration = Duration::from_secs(30);
 
@@ -313,6 +333,8 @@ struct Inner {
     traced: Mutex<HashSet<String>>,
     /// Когда был прошлый пульс (для «пульс опоздал» в журнале).
     last_beat: Mutex<Option<Instant>>,
+    /// Вызов, который держит блокировку (`lock`).
+    lock: Mutex<Option<String>>,
 }
 
 /// Запущенный сервер. `stop()` — штатная остановка; при уничтожении без `stop()` поток тоже останавливается.
@@ -348,6 +370,7 @@ impl Server {
             foreign: Mutex::new(None),
             traced: Mutex::new(HashSet::new()),
             last_beat: Mutex::new(None),
+            lock: Mutex::new(None),
         });
         let trace_to = trace::init_from_env(&inner.layout.root, "server");
         trace::event(
@@ -467,7 +490,7 @@ impl Inner {
     fn passport(&self, clients: Vec<ClientFile>) -> Channel {
         let mut roots = self.cfg.roots.clone();
         roots.entry("channel".into()).or_insert_with(|| ".".into());
-        let mut features = vec!["cancel".to_string(), "batch".to_string()];
+        let mut features: Vec<String> = ["cancel", "batch", steps::FEATURE_STEPS, steps::FEATURE_LOCK].iter().map(|s| s.to_string()).collect();
         for f in &self.cfg.features {
             if !features.contains(f) {
                 features.push(f.clone());
@@ -754,13 +777,43 @@ impl Inner {
             return fail(exit::TIMEOUT, "Запрос пролежал дольше своего срока и не выполнялся".into(), reason::EXPIRED);
         }
         let ops: Vec<Op> = match (&req.command, &req.batch) {
-            (Some(c), None) if !c.is_empty() => vec![Op { command: c.clone(), args: req.args.clone(), params: req.params.clone() }],
+            (Some(c), None) if !c.is_empty() => vec![Op { command: c.clone(), args: req.args.clone(), params: req.params.clone(), ..Default::default() }],
             (None, Some(b)) if !b.is_empty() => b.clone(),
             _ => return fail(exit::USAGE, "Нужно либо command, либо непустой batch".into(), reason::BAD_REQUEST),
         };
         let single = req.batch.is_none();
         if single && !self.has_command(&ops[0].command) {
             return fail(exit::UNKNOWN_COMMAND, format!("Нет команды «{}». Список — help", ops[0].command), reason::UNKNOWN_COMMAND);
+        }
+        if !single {
+            if let Err(e) = steps::step_ids(&ops) {
+                return fail(exit::USAGE, format!("Пакет: {e}"), reason::BAD_REQUEST);
+            }
+        }
+        // блокировка: пока идёт вызов с lock, чужие меняющие вызовы — код 6 (force проходит)
+        {
+            let mut lock = self.lock.lock().unwrap();
+            if let Some(holder) = lock.clone() {
+                let changes = ops.iter().any(|o| !self.read_only(&o.command));
+                if changes && !req.force {
+                    drop(lock);
+                    trace::event("call.reject", json!({ "id": id, "exit": exit::BUSY, "reason": reason::BUSY, "busyWith": holder }));
+                    let mut d = Done {
+                        id: id.clone(),
+                        exit_code: exit::BUSY,
+                        error: Some(format!("Идёт вызов {holder} с блокировкой — дождитесь его, отмените или повторите с force")),
+                        reason: Some(reason::BUSY.into()),
+                        data: json!({ "busyWith": holder }),
+                        accepted: Some(accepted.clone()),
+                        ..Default::default()
+                    };
+                    self.finish(&id, &mut d, keep, None);
+                    return;
+                }
+            } else if req.lock {
+                *lock = Some(id.clone());
+                trace::event("lock", json!({ "id": id, "taken": true }));
+            }
         }
         trace::event(
             "call.accept",
@@ -783,6 +836,8 @@ impl Inner {
             cancel: state.cancel.clone(),
             finished: state.finished.clone(),
             deadline: state.deadline,
+            cleanup: AtomicBool::new(false),
+            step_deadline: Mutex::new(None),
             age_at_claim_ms: (age * 1000.0).round(),
             active: Mutex::new(Active {
                 v: V,
@@ -818,6 +873,11 @@ impl Inner {
 
     fn has_command(&self, name: &str) -> bool {
         self.commands.iter().any(|c| c.name == name)
+    }
+
+    /// Команда только читает (проходит чужую блокировку). `trash.clean` проходит любые блокировки (SPEC 7).
+    fn read_only(&self, name: &str) -> bool {
+        name == "trash.clean" || self.commands.iter().any(|c| c.name == name && c.read_only)
     }
 
     fn execute(&self, ctx: &Ctx, op: &Op) -> Outcome {
@@ -858,30 +918,110 @@ impl Inner {
         }
     }
 
+    /// Пакет (SPEC 5.2): шаги по порядку, подстановки, проверки, остановка по ошибке, шаги `always`.
     fn run_batch(&self, ctx: &Ctx, ops: &[Op], stop_on_error: bool) -> Done {
-        let mut items = Vec::new();
+        let ids = steps::step_ids(ops).unwrap_or_else(|_| (1..=ops.len()).map(|i| format!("s{i}")).collect());
+        let mut results: HashMap<String, StepResult> = HashMap::new();
+        let mut items: Vec<Item> = Vec::new();
         let mut output = String::new();
-        let mut first_fail: Option<(i32, String, Option<String>)> = None;
         let mut artifacts = Vec::new();
-        for (i, op) in ops.iter().enumerate() {
-            if ctx.cancelled() {
+        let mut first_fail: Option<(i32, String, Option<String>)> = None;
+        // почему пакет остановлен: ошибка шага со stop или отмена/срок вызова
+        let mut stopped: Option<&'static str> = None;
+        for (i, (op, id)) in ops.iter().zip(&ids).enumerate() {
+            if stopped.is_none() && ctx.cancel.load(Ordering::SeqCst) {
+                stopped = Some("cancelled");
                 first_fail.get_or_insert((exit::CANCELLED, "Отменено".into(), Some(reason::CANCELLED.into())));
-                break;
             }
-            ctx.set_phase(&format!("{} ({}/{})", op.command, i + 1, ops.len()), Some(i as f64 / ops.len() as f64));
-            let o = self.execute(ctx, op);
+            if stopped.is_some() && !op.always {
+                let status = if stopped == Some("cancelled") { "cancelled" } else { "skipped" };
+                let code = if status == "cancelled" { exit::CANCELLED } else { 0 };
+                items.push(Item { id: Some(id.clone()), command: Some(op.command.clone()), status: Some(status.into()), exit_code: code, ..Default::default() });
+                continue;
+            }
+            // шаг уборки после остановки — со своим сроком, отмена вызова к нему не относится
+            ctx.cleanup.store(stopped.is_some(), Ordering::SeqCst);
+            let limit = op.timeout.map(Duration::from_secs_f64).or(if stopped.is_some() { Some(CLEANUP_STEP) } else { None });
+            *ctx.step_deadline.lock().unwrap() = limit.map(|l| Instant::now() + l);
+            ctx.set_phase(&format!("{id}: {} ({}/{})", op.command, i + 1, ops.len()), Some(i as f64 / ops.len() as f64));
+            let started = Instant::now();
+            let (o, expect) = match steps::resolve(op, &results) {
+                Ok(r) => {
+                    let e = r.expect.clone();
+                    (self.execute(ctx, &r), e)
+                }
+                Err(e) => (Outcome::fail(exit::USAGE, e, Some("bad-reference")), op.expect.clone()),
+            };
+            let step_timed_out = limit.is_some() && ctx.step_deadline.lock().unwrap().map(|d| Instant::now() >= d).unwrap_or(false);
+            *ctx.step_deadline.lock().unwrap() = None;
+            let mut misses = if o.reason.as_deref() == Some("bad-reference") { vec![] } else { steps::check_expect(expect.as_ref(), o.exit, &o.output, &o.data) };
+            let mut exit_code = o.exit;
+            let mut error = o.error.clone();
+            let mut why = o.reason.clone();
+            if step_timed_out && o.exit != 0 {
+                exit_code = exit::TIMEOUT;
+                why = Some("step-timeout".into());
+                error = Some(format!("шаг не уложился в {:.0} с", limit.unwrap().as_secs_f64()));
+            }
+            let failed = if o.reason.as_deref() == Some("bad-reference") { true } else { !misses.is_empty() };
+            if failed && o.exit == 0 && exit_code == 0 {
+                // команда прошла, но проверка нет
+                exit_code = exit::FAILED;
+                why = Some("expect-failed".into());
+                error = Some(format!("проверка не прошла: {}", misses.join("; ")));
+            } else if !failed {
+                // ожидаемая ошибка (expect.exit) — шаг успешен
+                exit_code = 0;
+                error = None;
+                why = None;
+            } else if !misses.is_empty() && error.is_none() {
+                error = Some(misses.join("; "));
+            }
+            if !failed {
+                misses.clear();
+            }
+            output.push_str(&format!("▸ {id} {} — {}\n", op.command, if failed { "ошибка" } else { "ok" }));
             output.push_str(&o.output);
-            artifacts.extend(o.artifacts.iter().cloned());
-            if o.exit != 0 && first_fail.is_none() {
-                let e = o.error.clone().unwrap_or_else(|| format!("код {}", o.exit));
-                first_fail = Some((o.exit, format!("{}: {e}", op.command), o.reason.clone()));
+            if !o.output.is_empty() && !o.output.ends_with('\n') {
+                output.push('\n');
             }
-            let failed = o.exit != 0;
-            items.push(Item { ok: o.exit == 0, exit_code: o.exit, error: o.error, reason: o.reason, data: o.data });
-            if failed && stop_on_error {
-                break;
+            artifacts.extend(o.artifacts.iter().cloned());
+            results.insert(id.clone(), StepResult { exit: o.exit, output: o.output.clone(), data: o.data.clone() });
+            let mut item_out: String = o.output.chars().take(ITEM_OUTPUT).collect();
+            if o.output.chars().count() > ITEM_OUTPUT {
+                item_out.push_str("\n…");
+            }
+            items.push(Item {
+                id: Some(id.clone()),
+                command: Some(op.command.clone()),
+                status: Some(if failed { "failed" } else { "ok" }.into()),
+                ok: !failed,
+                exit_code,
+                error: error.clone(),
+                reason: why.clone(),
+                data: o.data,
+                output: item_out,
+                expect_failed: misses,
+                seconds: Some((started.elapsed().as_secs_f64() * 100.0).round() / 100.0),
+            });
+            if failed {
+                if first_fail.is_none() {
+                    first_fail = Some((exit_code, format!("{id} ({}): {}", op.command, error.clone().unwrap_or_else(|| format!("код {exit_code}"))), why.clone()));
+                }
+                let stop_here = match op.on_error.as_deref() {
+                    Some("continue") => false,
+                    Some("stop") => true,
+                    _ => stop_on_error,
+                };
+                if stopped.is_none() && ctx.cancel.load(Ordering::SeqCst) {
+                    // шаг прервала отмена вызова — дальше только уборка
+                    stopped = Some("cancelled");
+                } else if stop_here && stopped.is_none() {
+                    stopped = Some("failed");
+                }
             }
         }
+        ctx.cleanup.store(false, Ordering::SeqCst);
         let (code, error, why) = match first_fail {
             Some((c, e, r)) => (c, Some(e), r),
             None => (0, None, None),
@@ -949,6 +1089,11 @@ impl Inner {
         }
         self.seen.lock().unwrap().insert(id.to_string(), SystemTime::now() + Duration::from_secs_f64(keep.max(ORPHAN_AGE)));
         self.running.lock().unwrap().remove(id);
+        let mut lock = self.lock.lock().unwrap();
+        if lock.as_deref() == Some(id) {
+            *lock = None;
+            trace::event("lock", json!({ "id": id, "taken": false }));
+        }
     }
 
     /// Срок вызова вышел: попросить отменить; через 30 с — закрыть кодом 5 самому.

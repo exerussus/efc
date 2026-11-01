@@ -49,6 +49,41 @@
           },
           "params": {
             "type": "object"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,32}$"
+          },
+          "expect": {
+            "type": "object",
+            "properties": {
+              "exit": {
+                "type": "integer"
+              },
+              "output": {
+                "type": "string"
+              },
+              "notOutput": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          },
+          "always": {
+            "type": "boolean"
+          },
+          "onError": {
+            "enum": [
+              "stop",
+              "continue"
+            ]
+          },
+          "timeout": {
+            "type": "number",
+            "exclusiveMinimum": 0
           }
         }
       }
@@ -75,6 +110,9 @@
       "minimum": 0
     },
     "force": {
+      "type": "boolean"
+    },
+    "lock": {
       "type": "boolean"
     }
   },

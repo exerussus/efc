@@ -13,6 +13,7 @@ pub mod client;
 pub mod fsx;
 pub mod model;
 pub mod server;
+pub mod steps;
 pub mod time;
 pub mod trace;
 

@@ -26,6 +26,8 @@
   "features": [
     "cancel",
     "batch",
+    "steps",
+    "lock",
     "inbox",
     "state",
     "artifacts"

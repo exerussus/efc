@@ -27,13 +27,31 @@ folder first (`cp <channel>/efc ~/efc && chmod +x ~/efc`).
 efc --channel X call <command> [args…]      # everything after the command name goes to the command as is
 efc --channel X --json call <command> …     # full result as JSON (data, artifacts, reason)
 efc --channel X --params '{"k":"v"}' call <command>
-efc --channel X batch steps.json            # several commands in one call: {"batch":[{"command":…,"args":[…]}],"onError":"stop"}
+efc --channel X batch steps.json            # several commands in one call (see Batches)
 ```
 
 The exit code is the call's code: 0 ok, 1 failed, 2 bad arguments, 3 no such command, 4 crashed or server
 restarted, 5 time is up (the call may still run — see below), 6 busy, 7 cancelled, 8 denied (no rights or the
 human did not confirm), 10 no server, 11 several channels match, 13 server silent. Branch on `reason` in
 `--json` output, not on the error text. Paths after `→` are artifacts already mapped to local paths — open them.
+
+## Batches
+
+One call instead of many round trips. If `channel.json` lists `steps`, steps can reference and check each other:
+
+```json
+{ "onError": "stop", "batch": [
+  { "id": "build", "command": "build" },
+  { "id": "run",   "command": "start" },
+  { "id": "check", "command": "logs", "args": ["--since", "${run.logSince}"], "expect": { "data": { "rows": 0 } } },
+  { "id": "stop",  "command": "stop", "always": true } ] }
+```
+
+`${step.path}` reads the `data` of an earlier step (also `exitCode`, `output`, `ok`); `expect` takes `exit`,
+`output`, `notOutput`, `data`; `always` runs even after a failure or cancel (cleanup); `onError` and `timeout`
+work per step. Read `items[]` in `--json` output: `status` is `ok`, `failed`, `skipped` or `cancelled`, failed
+checks are in `expectFailed`. `--lock` (if the server lists `lock`) keeps other changing calls out while the
+batch runs. Without `steps`/`lock` in the passport, `efc` refuses such a batch — use plain commands instead.
 
 ## Long commands
 
@@ -54,6 +72,8 @@ A call accepted by the server is never lost: its result waits in the channel unt
 - `diag` shows `ЖДЁТ: …` for a call: the server waits for a human (confirmation on its side). Tell the user
   what to confirm; do not retry the call.
 - Code 8 with `reason: no-approval`: the human declined or nobody was at the server's terminal.
+- Code 6 with `reason: busy`: another call holds a lock (`data.busyWith`); wait for it or ask the user before
+  using `--force`.
 
 ## Debugging
 

@@ -69,6 +69,8 @@ pub struct CallOpts {
     /// Сколько ждать самому клиенту, с (по умолчанию — `timeout`).
     pub max_wait: Option<f64>,
     pub force: bool,
+    /// Блокировка на время вызова (сервер должен объявить `lock`).
+    pub lock: bool,
 }
 
 
@@ -129,6 +131,26 @@ impl Client {
         }
     }
 
+    /// Сервер умеет то, что просит запрос? Шаги пакета и `lock` без объявленной поддержки сервер молча
+    /// проигнорировал бы — например, вернул бы «успех», не проверив `expect`.
+    pub fn supports(&self, req: &Request) -> Result<(), String> {
+        let Some(ch) = &self.channel else { return Ok(()) };
+        let has = |f: &str| ch.features.iter().any(|x| x == f);
+        if req.batch.is_some() && !has("batch") {
+            return Err(format!("сервер {} не поддерживает пакеты (нет batch в паспорте)", ch.server));
+        }
+        if crate::steps::uses_steps(req) && !has(crate::steps::FEATURE_STEPS) {
+            return Err(format!(
+                "сервер {} не поддерживает шаги пакета (id, ${{…}}, expect, always, onError/timeout у шага): нет steps в паспорте",
+                ch.server
+            ));
+        }
+        if req.lock && !has(crate::steps::FEATURE_LOCK) {
+            return Err(format!("сервер {} не поддерживает lock (нет lock в паспорте)", ch.server));
+        }
+        Ok(())
+    }
+
     /// Подсказка человеку, как запустить сервер.
     pub fn how_to_start(&self) -> String {
         match &self.channel {
@@ -150,6 +172,7 @@ impl Client {
             timeout: opts.timeout,
             keep: opts.keep,
             force: opts.force,
+            lock: opts.lock,
             ..Default::default()
         };
         self.submit_request(req)
@@ -163,6 +186,7 @@ impl Client {
         if !fsx::valid_id(&req.id) {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "недопустимый id"));
         }
+        self.supports(&req).map_err(|e| std::io::Error::new(std::io::ErrorKind::Unsupported, e))?;
         req.v = V;
         req.created.get_or_insert_with(time::now_iso);
         req.from.get_or_insert_with(|| self.from.clone());

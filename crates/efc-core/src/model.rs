@@ -85,14 +85,45 @@ impl PathRef {
     }
 }
 
-/// Одна команда пакета.
+/// Проверка результата шага (SPEC 5.2.1).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Expect {
+    /// Ожидаемый код (по умолчанию 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<i32>,
+    /// Подстрока, которая должна быть в выводе.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// Подстрока, которой в выводе быть не должно.
+    #[serde(default, rename = "notOutput", skip_serializing_if = "Option::is_none")]
+    pub not_output: Option<String>,
+    /// Поля `data` (путь через точку) и их значения.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Map<String, Value>>,
+}
+
+/// Одна команда пакета (шаг).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Op {
+    /// Имя шага для подстановок `${id.поле}` (по умолчанию `s1`, `s2`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub params: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect: Option<Expect>,
+    /// Выполнять и после ошибки или отмены (уборка).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub always: bool,
+    /// `stop` | `continue` — для этого шага (иначе — как у пакета).
+    #[serde(default, rename = "onError", skip_serializing_if = "Option::is_none")]
+    pub on_error: Option<String>,
+    /// Предел шага, с.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<f64>,
 }
 
 /// Запрос — `requests/<id>.json`.
@@ -100,6 +131,8 @@ pub struct Op {
 pub struct Request {
     #[serde(default = "v1")]
     pub v: u32,
+    /// Пустой — клиент подставит новый (в файле пакета id не нужен); сервер пустой id отклоняет.
+    #[serde(default)]
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -121,6 +154,9 @@ pub struct Request {
     pub keep: Option<f64>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub force: bool,
+    /// Пока вызов идёт, чужие меняющие вызовы получают код 6 (если сервер объявил `lock`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub lock: bool,
 }
 
 /// Что нужно, чтобы вызов пошёл дальше.
@@ -155,6 +191,13 @@ pub struct Active {
 /// Итог элемента пакета.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Item {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// `ok` | `failed` | `skipped` | `cancelled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
     pub ok: bool,
     #[serde(rename = "exitCode")]
     pub exit_code: i32,
@@ -164,6 +207,12 @@ pub struct Item {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub data: Value,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub output: String,
+    #[serde(default, rename = "expectFailed", skip_serializing_if = "Vec::is_empty")]
+    pub expect_failed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f64>,
 }
 
 /// Итог — `done/<id>.json`.
@@ -488,6 +537,11 @@ mod tests {
         assert_eq!(i.suggest.len(), 1);
         let idx: Vec<IndexEntry> = crate::fsx::read_json(&dir.join(".efc-channels.json")).expect("index");
         assert_eq!(idx.len(), 2);
+        let st: Request = crate::fsx::read_json(&dir.join("request-steps.json")).expect("steps");
+        assert!(st.lock && crate::steps::uses_steps(&st));
+        assert_eq!(st.batch.as_ref().unwrap()[2].expect.as_ref().unwrap().data.as_ref().unwrap()["rows"], 0);
+        let sd: Done = crate::fsx::read_json(&dir.join("result-steps.json")).expect("steps result");
+        assert_eq!(sd.items.unwrap()[2].expect_failed.len(), 1);
     }
 
     #[test]

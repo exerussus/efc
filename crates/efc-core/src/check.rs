@@ -5,6 +5,7 @@
 use crate::client::{CallOpts, Client, Waited};
 use crate::fsx;
 use crate::model::*;
+use crate::steps::FEATURE_STEPS;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
@@ -31,6 +32,7 @@ const CHECKS: &[(&str, Check)] = &[
     ("повтор id не выполняется", duplicate),
     ("отзыв запроса без гонки", withdraw),
     ("пакет: итог по каждому элементу", batch),
+    ("шаги пакета: ${…}, expect, continue, always", steps_check),
     ("trash.clean и --dry", trash),
     ("help", help),
 ];
@@ -267,13 +269,20 @@ fn withdraw(c: &Client) -> Result<String, String> {
     }
 }
 
+fn has(c: &Client, f: &str) -> bool {
+    c.channel.as_ref().map(|ch| ch.features.iter().any(|x| x == f)).unwrap_or(false)
+}
+
+fn op(id: Option<&str>, command: &str) -> Op {
+    Op { id: id.map(String::from), command: command.into(), ..Default::default() }
+}
+
 fn batch(c: &Client) -> Result<String, String> {
+    if !has(c, "batch") {
+        return Ok("пропущено: сервер не объявил batch".into());
+    }
     let req = Request {
-        batch: Some(vec![
-            Op { command: "ping".into(), ..Default::default() },
-            Op { command: "efc-check.no-such-command".into(), ..Default::default() },
-            Op { command: "ping".into(), ..Default::default() },
-        ]),
+        batch: Some(vec![op(None, "ping"), op(None, "efc-check.no-such-command"), op(None, "ping")]),
         timeout: Some(30.0),
         keep: Some(60.0),
         ..Default::default()
@@ -281,10 +290,54 @@ fn batch(c: &Client) -> Result<String, String> {
     let id = c.submit_request(req).map_err(|e| e.to_string())?;
     let d = wait_done(c, &id, 15.0).ok_or("итога нет")?;
     let items = d.items.as_ref().ok_or("нет items")?;
-    if items.len() != 2 || !items[0].ok || items[1].exit_code != exit::UNKNOWN_COMMAND || d.exit_code != exit::UNKNOWN_COMMAND {
-        return Err(format!("ожидалось: ping ок, затем 3 и остановка; получено {} элементов, код {}", items.len(), d.exit_code));
+    // по элементу на каждую команду: выполненные, затем пропущенные
+    let executed: Vec<&Item> = items.iter().filter(|i| !matches!(i.status.as_deref(), Some("skipped") | Some("cancelled"))).collect();
+    if executed.len() != 2 || !executed[0].ok || executed[1].exit_code != exit::UNKNOWN_COMMAND || d.exit_code != exit::UNKNOWN_COMMAND {
+        return Err(format!("ожидалось: ping ок, затем 3 и остановка; выполнено {}, код {}", executed.len(), d.exit_code));
+    }
+    if items.len() == 3 && items[2].status.as_deref() != Some("skipped") {
+        return Err("третий элемент после остановки должен быть skipped".into());
     }
     Ok("ok, 3, остановка".into())
+}
+
+fn steps_check(c: &Client) -> Result<String, String> {
+    if !has(c, FEATURE_STEPS) {
+        return Ok("пропущено: сервер не объявил steps".into());
+    }
+    let expect = |e: Value| -> Option<Expect> { Some(serde_json::from_value(e).unwrap()) };
+    let ops = vec![
+        // a — источник данных
+        op(Some("a"), "ping"),
+        // b — подстановка в expect: тот же сервер, что у a
+        Op { expect: expect(json!({ "data": { "server": "${a.server}" } })), ..op(Some("b"), "ping") },
+        // c — ошибка, но пакет продолжается
+        Op { on_error: Some("continue".into()), ..op(Some("c"), "efc-check.no-such-command") },
+        // d — ожидаемая ошибка: код 3 считается успехом
+        Op { expect: expect(json!({ "exit": 3 })), ..op(Some("d"), "efc-check.no-such-command") },
+        // e — проверка вывода не проходит → остановка
+        Op { expect: expect(json!({ "notOutput": "pong" })), ..op(Some("e"), "ping") },
+        // f — пропускается
+        op(Some("f"), "ping"),
+        // g — уборка: выполняется и после остановки
+        Op { always: true, ..op(Some("g"), "ping") },
+    ];
+    let req = Request { batch: Some(ops), timeout: Some(30.0), keep: Some(60.0), ..Default::default() };
+    let id = c.submit_request(req).map_err(|e| e.to_string())?;
+    let d = wait_done(c, &id, 15.0).ok_or("итога нет")?;
+    let items = d.items.as_ref().ok_or("нет items")?;
+    let st: Vec<String> = items.iter().map(|i| format!("{}:{}", i.id.clone().unwrap_or_default(), i.status.clone().unwrap_or_default())).collect();
+    let want = ["a:ok", "b:ok", "c:failed", "d:ok", "e:failed", "f:skipped", "g:ok"];
+    if st != want {
+        return Err(format!("статусы шагов {st:?}, ожидались {want:?}"));
+    }
+    if items[4].expect_failed.is_empty() || items[4].reason.as_deref() != Some("expect-failed") {
+        return Err("у шага e нет expectFailed / reason expect-failed".into());
+    }
+    if d.ok || d.exit_code != exit::UNKNOWN_COMMAND {
+        return Err(format!("итог пакета: ожидался код 3 (первая ошибка — шаг c), получен {}", d.exit_code));
+    }
+    Ok("подстановка, expect, continue, always — ok".into())
 }
 
 fn trash(c: &Client) -> Result<String, String> {

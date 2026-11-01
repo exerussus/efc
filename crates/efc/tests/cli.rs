@@ -339,3 +339,28 @@ fn allow_list_from_flag() {
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v["data"]["exitCode"], 4);
 }
+
+#[test]
+fn batch_file_with_steps() {
+    let base = temp();
+    let ch = base.join(".efc");
+    let _s = serve(&ch, &["--config", &config(&base, vec![h("say", &["echo"], none()), h("fail", &["exit", "2"], none())])]);
+    let file = base.join("steps.json");
+    std::fs::write(
+        &file,
+        r#"{ "batch": [
+            { "id": "a", "command": "say", "args": ["первый"] },
+            { "id": "b", "command": "say", "args": ["${a.exitCode}"], "expect": { "output": "0" } },
+            { "id": "c", "command": "fail", "expect": { "exit": 1 } },
+            { "id": "d", "command": "fail" },
+            { "id": "e", "command": "say", "args": ["пропущен"] },
+            { "id": "f", "command": "say", "args": ["уборка"], "always": true } ] }"#,
+    )
+    .unwrap();
+    let o = efc(&ch, &["batch", file.to_str().unwrap()]);
+    let (out, err) = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{out}\n{err}");
+    assert!(out.contains("▸ a say — ok") && out.contains("первый") && out.contains("▸ f say — ok") && out.contains("уборка"), "{out}");
+    assert!(!out.contains("пропущен\n"), "шаг e не должен выполняться: {out}");
+    assert!(err.contains("✗ d (fail)") && err.contains("пропущены: e"), "{err}");
+}
