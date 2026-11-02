@@ -321,9 +321,9 @@ impl CommandInfo {
     }
 }
 
-/// Лимиты канала.
+/// Лимиты канала. Каждое поле необязательно: чего нет в паспорте — по умолчанию (SPEC 4).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Limits {
     pub request_bytes: u64,
     pub output_chars: u64,
@@ -542,6 +542,16 @@ mod tests {
         assert_eq!(st.batch.as_ref().unwrap()[2].expect.as_ref().unwrap().data.as_ref().unwrap()["rows"], 0);
         let sd: Done = crate::fsx::read_json(&dir.join("result-steps.json")).expect("steps result");
         assert_eq!(sd.items.unwrap()[2].expect_failed.len(), 1);
+    }
+
+    #[test]
+    fn partial_limits_and_unknown_fields() {
+        let ch: Channel = serde_json::from_str(
+            r#"{"protocol":"efc/1","instance":"i","server":"s","version":"1","limits":{"defaultKeep":300},"somethingNew":1,"commands":[{"name":"x","extra":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(ch.limits.default_keep, 300.0);
+        assert_eq!(ch.limits.queue, Limits::default().queue);
     }
 
     #[test]
